@@ -1,0 +1,67 @@
+---
+- name: Install apt packets
+  apt:
+    name:
+      - nginx
+      - iptables
+    update_cache: false
+    state: present
+
+- name: Setup webserver
+  template:
+    src: default.conf.j2
+    dest: /etc/nginx/sites-enabled/default
+  notify: Restart nginx
+
+- name: Setup webspace
+  file:
+    path: /var/www/default
+    state: directory
+    mode: '0655'
+    owner: root
+    group: root
+
+- name: Copy webcontent
+  template:
+    src: index.html.j2
+    dest: /var/www/default/index.html
+
+- name: Clear nat iptables
+  ansible.builtin.command:
+    cmd: iptables -t nat -F
+
+- name: Set DNAT/SNAT rules for DSR
+  block:
+  - name: Install SNAT rule
+    ansible.builtin.command:
+      cmd: "iptables -t nat -A POSTROUTING -o {{ ingress_if }} -s {{ ingress_ip.split('/')[0] }} -p tcp --sport 80 -j SNAT --to {{ virtual_service_ip.split('/')[0] }}"
+  - name: Install DNAT rule
+    ansible.builtin.command:
+      cmd: "iptables -t nat -A PREROUTING -i {{ ingress_if }} -d {{ virtual_service_ip.split('/')[0] }} -p tcp -j DNAT --to {{ ingress_ip.split('/')[0] }}"
+
+- name: Create directory for keepalive watchdog signal
+  file:
+    path: /opt/watchdog
+    state: directory
+    mode: '0744'
+    owner: root
+    group: root
+
+- name: Copy keepalive binary
+  ansible.builtin.copy:
+    src: ../tools/keepalive
+    dest: /opt/watchdog/keepalive
+    mode: '0744'
+    owner: root
+    group: root
+
+- name: Copy systemd service file
+  template:
+    src: wd.service.j2
+    dest: /etc/systemd/system/wd.service
+  notify: Restart watchdog
+
+- name: Install systemd service
+  ansible.builtin.systemd_service:
+    name: wd
+    enabled: true

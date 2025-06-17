@@ -1,0 +1,57 @@
+---
+- name: Install apt packets
+  apt:
+    name:
+      - keepalived
+      - arping
+    update_cache: false
+    state: present
+
+- name: Setup keepalived
+  template:
+    src: keepalived.conf.j2
+    dest: /etc/keepalived/keepalived.conf
+  notify: Restart Keepalived
+
+- name: Get list of webserver ingress IPs
+  set_fact:
+    ingress_ips: >-
+      {{
+        groups['webservers']
+        | map('extract', hostvars)
+        | map(attribute='ingress_ip')
+        | map('regex_replace', '/[0-9]+$', '')
+        | list
+      }}
+
+- name: Create directory for loadbalancer files
+  file:
+    path: /opt/loadbalancer
+    state: directory
+    mode: '0744'
+    owner: root
+    group: root
+
+- name: Copy config for loadbalancer
+  template:
+    src: lbconfig.cfg.j2
+    dest: /opt/loadbalancer/config.cfg
+
+- name: Copy loadbalancer binary
+  ansible.builtin.copy:
+    src: ../bpf/loadbalancer
+    dest: /opt/loadbalancer/loadbalancer
+    mode: '0744'
+    owner: root
+    group: root
+
+- name: Copy systemd service file
+  template:
+    src: lb.service.j2
+    dest: /etc/systemd/system/lb.service
+  notify: Restart loadbalancer
+
+- name: Install systemd service
+  ansible.builtin.systemd_service:
+    name: lb
+    enabled: true

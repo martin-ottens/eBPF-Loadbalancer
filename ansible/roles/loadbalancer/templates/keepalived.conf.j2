@@ -1,0 +1,14 @@
+vrrp_instance ingress {
+    state {{ vrrp_initial_state }}
+    interface {{ ingress_if }}
+    virtual_router_id 11
+    priority {{ 51 if vrrp_initial_state ==  "MASTER" else 1 }}
+    advert_int 1
+
+    virtual_ipaddress {
+        {{ virtual_service_ip }} dev {{ ingress_if }}
+    }
+
+    preempt_delay 300
+    garp_master_delay 1
+}

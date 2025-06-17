@@ -1,0 +1,58 @@
+---
+- name: Update apt cache
+  apt:
+    update_cache: true
+
+- name: Install apt packets
+  apt:
+    name:
+      - iproute2
+      - curl
+      - wget
+      - vim
+      - libconfig-dev
+    update_cache: false
+    state: present
+
+
+- name: Check if ingress interface {{ ingress_if }} is up
+  ansible.builtin.command:
+    cmd: ip link show {{ ingress_if }}
+  register: ingress_status
+  changed_when: false
+  failed_when: false
+
+- name: Configure interface {{ ingress_if }}
+  when: "'state DOWN' in ingress_status.stdout"
+  block:
+    - name: Assign address to {{ ingress_if }}
+      ansible.builtin.command:
+        cmd: ip addr add {{ ingress_ip }} dev {{ ingress_if }}
+      ignore_errors: true
+    - name: Bring interface {{ ingress_if }} up
+      ansible.builtin.command:
+        cmd: ip link set up dev {{ ingress_if }}
+
+- name: Check if keepalive interface {{ keepalive_if }} is up
+  ansible.builtin.command:
+    cmd: ip link show {{ keepalive_if }}
+  register: keepalive_status
+  changed_when: false
+  failed_when: false
+
+- name: Configure interface {{ keepalive_if }}
+  when: "'state DOWN' in keepalive_status.stdout"
+  block:
+    - name: Assign address to {{ keepalive_if }}
+      ansible.builtin.command:
+        cmd: ip addr add {{ keepalive_ip }} dev {{ keepalive_if }}
+      ignore_errors: true
+    - name: Bring interface {{ keepalive_if }} up
+      ansible.builtin.command:
+        cmd: ip link set up dev {{ keepalive_if }}
+
+- name: Enable IP forwarding
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_forward
+    value: '1'
+    sysctl_set: true

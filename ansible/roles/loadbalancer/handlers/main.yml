@@ -1,0 +1,10 @@
+---
+- name: Restart Keepalived
+  ansible.builtin.systemd_service:
+    name: keepalived
+    state: restarted
+
+- name: Restart loadbalancer
+  ansible.builtin.systemd_service:
+    name: lb
+    state: restarted

@@ -1,0 +1,14 @@
+[Unit]
+Description=Loadbalancer Watchdog Signal
+After=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/opt/watchdog/keepalive 239.0.0.1 {{ keepalive_ip.split("/")[0] }} {{ ingress_ip.split("/")[0] }}
+WorkingDirectory=/opt/watchdog
+Restart=always
+RestartSec=10s
+
+[Install]
+WantedBy=multi-user.target

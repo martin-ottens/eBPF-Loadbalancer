@@ -1,0 +1,21 @@
+---
+- name: Do base setup
+  hosts: all
+  become: yes
+  become_method: sudo
+  roles:
+    - base
+
+- name: Setup loadbalancers
+  hosts: loadbalancers
+  become: yes
+  become_method: sudo
+  roles:
+    - loadbalancer
+
+- name: Setup webservers
+  hosts: webservers
+  become: yes
+  become_method: sudo
+  roles:
+    - webserver

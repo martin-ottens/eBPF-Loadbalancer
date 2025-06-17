@@ -1,0 +1,14 @@
+[Unit]
+Description=eBPF Loadbalancer
+After=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/opt/loadbalancer/loadbalancer config.cfg
+WorkingDirectory=/opt/loadbalancer
+Restart=always
+RestartSec=10s
+
+[Install]
+WantedBy=multi-user.target

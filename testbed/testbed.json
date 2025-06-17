@@ -1,0 +1,102 @@
+{
+    "settings": {
+        "management_network": "172.16.99.0/24",
+        "diskimage_basepath": "/images/"
+    },
+    "networks": [
+        {
+            "name": "ingress",
+            "host_ports": []
+        },
+        {
+            "name": "keepalive",
+            "host_ports": []
+        }
+    ],
+    "integrations": [],
+    "instances": [
+        {
+            "name": "user",
+            "diskimage": "debian-12.qcow2",
+            "setup_script": null,
+            "environment": null,
+            "cores": 2,
+            "memory": 1024,
+            "management_address": "172.16.99.99",
+            "networks": [
+                "ingress"
+            ],
+            "applications": []
+        },
+        {
+            "name": "lb1",
+            "diskimage": "debian-12.qcow2",
+            "setup_script": null,
+            "environment": null,
+            "cores": 2,
+            "memory": 1024,
+            "management_address": "172.16.99.2",
+            "networks": [
+                "ingress",
+                "keepalive"
+            ],
+            "applications": []
+        },
+        {
+            "name": "lb2",
+            "diskimage": "debian-12.qcow2",
+            "setup_script": null,
+            "environment": null,
+            "cores": 2,
+            "memory": 1024,
+            "management_address": "172.16.99.3",
+            "networks": [
+                "ingress",
+                "keepalive"
+            ],
+            "applications": []
+        },
+        {
+            "name": "web1",
+            "diskimage": "debian-12.qcow2",
+            "setup_script": null,
+            "environment": null,
+            "cores": 2,
+            "memory": 1024,
+            "management_address": "172.16.99.101",
+            "networks": [
+                "ingress",
+                "keepalive"
+            ],
+            "applications": []
+        },
+        {
+            "name": "web2",
+            "diskimage": "debian-12.qcow2",
+            "setup_script": null,
+            "environment": null,
+            "cores": 2,
+            "memory": 1024,
+            "management_address": "172.16.99.102",
+            "networks": [
+                "ingress",
+                "keepalive"
+            ],
+            "applications": []
+        },
+        {
+            "name": "web3",
+            "diskimage": "debian-12.qcow2",
+            "setup_script": null,
+            "environment": null,
+            "cores": 2,
+            "memory": 1024,
+            "management_address": "172.16.99.103",
+            "networks": [
+                "ingress",
+                "keepalive"
+            ],
+            "applications": []
+        }
+    ]
+}
