@@ -22,7 +22,7 @@ VMLINUX := $(BOOTSTRAP)/vmlinux.h/include/$(ARCH)/vmlinux.h
 # outdated
 INCLUDES := -I$(OUTPUT) -I$(BOOTSTRAP)/libbpf/include/uapi -I$(dir $(VMLINUX)) -I$(LIBBLAZESYM_INC)
 CFLAGS := -g -Wall
-EXTRA_LDFLAGS := -lconfig
+EXTRA_LDFLAGS := -lconfig -lbpf -lxdp
 ALL_LDFLAGS := $(LDFLAGS) $(EXTRA_LDFLAGS)
 
 APPS = loadbalancer

@@ -43,6 +43,14 @@ struct {
     __uint(max_entries, CONNTRACK_MAP_PERCPU_LEN);
 } conntrack_map SEC(".maps");
 
+// Mapping: Netdev RX queue -> AF_XDP socket
+struct {
+    __uint(type, BPF_MAP_TYPE_XSKMAP);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, __u32);
+} xsks_map SEC(".maps");
+
 static __always_inline __u32 hash_tuple(__u32 src_ip, __u32 dst_ip, 
     __u16 src_port, __u16 dst_port) 
 {
@@ -111,6 +119,8 @@ int xdp_lb(struct xdp_md *ctx)
     void *data = (void *)(long) ctx->data;
     void *data_end = (void *)(long) ctx->data_end;
 
+    bpf_printk("PACKET!\n");
+
     struct ethhdr *eth = data;
     if ((void *)(eth + 1) > data_end)
         return XDP_DROP;
@@ -154,6 +164,9 @@ int xdp_lb(struct xdp_md *ctx)
     __u64 rc = bpf_fib_lookup(ctx, &fib_lookup, sizeof(fib_lookup), 
                              BPF_FIB_LOOKUP_OUTPUT);
 
+    //__u32 qindex = ctx->rx_queue_index;
+    __u32 qindex = 0; // Simplification: Only one ring in AF_XDP
+
     switch (rc) {
         case BPF_FIB_LKUP_RET_BLACKHOLE:
         case BPF_FIB_LKUP_RET_UNREACHABLE:
@@ -162,9 +175,12 @@ int xdp_lb(struct xdp_md *ctx)
         case BPF_FIB_LKUP_RET_SUCCESS:
             break;
         case BPF_FIB_LKUP_RET_NO_NEIGH:
-            // TODO: Let the kernel do ARP for us, 
-            // e.g. by sending to AF_XDP socket userspace application
-            bpf_printk("ARP required.\n");
+            bpf_printk("REDIRECT!\n");
+            if (bpf_map_lookup_elem(&xsks_map, &qindex)) {
+                return bpf_redirect_map(&xsks_map, qindex, 0);
+            }
+            bpf_printk("AF_XDP lookup failed!\n");
+            return XDP_DROP;
         default:
             return XDP_PASS;
     }

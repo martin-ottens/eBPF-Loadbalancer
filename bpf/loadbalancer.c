@@ -11,6 +11,12 @@
 #include <sys/socket.h>
 #include <netinet/ip.h>
 #include <pthread.h>
+#include <bpf/bpf.h>
+#include <net/if.h>
+#include <linux/if_link.h>
+#include <linux/if_ether.h>
+#include <linux/bpf.h>
+#include <xdp/xsk.h>
 
 #include "loadbalancer.skel.h"
 #include "common.h"
@@ -21,9 +27,15 @@
 #define WATCHDOG_LISTEN_PORT 4242
 #define DECREMENT_TTL 1
 
+#define NUM_FRAMES 8192
+#define SIZE_PER_FRAME XSK_UMEM__DEFAULT_FRAME_SIZE
+#define XDP_RX_BATCH_SIZE 64
+
 static struct lb_config {
     char virtual_ip[IPV4_STR_LEN];
     __u32 virtual_ip_int;
+    char interface_name[INTNAME_MAX_LEN];
+    __u32 interface_id;
     char service_ips[LB_SERVICE_LEN][IPV4_STR_LEN];
     __u32 service_ips_int[LB_SERVICE_LEN];
     size_t service_ip_count;
@@ -42,6 +54,24 @@ typedef struct __lb_services {
     __u32 key;
     __u64 last_contact;
 } lb_services_t;
+
+static struct xsk_umem_info {
+    void *buf;
+    struct xsk_umem *umem;
+    struct xsk_ring_prod rxq;
+    struct xsk_ring_cons txq;
+} *umem_info;
+
+static struct xsk_socket_info {
+    struct xsk_socket *xsk;
+    struct xsk_ring_cons rxq;
+    struct xsk_ring_prod txq;
+    struct xsk_umem_info *umem;
+    __s32 ifindex;
+    __s32 queue_id;
+    __u32 prog_id;
+    __s32 xsks_map_fd;
+} *xsk_info;
 
 static service_entry_t bpf_services[LB_SERVICE_LEN];
 static lb_services_t services[LB_SERVICE_LEN];
@@ -90,6 +120,16 @@ static __s32 load_config(const char *filename, struct lb_config *config)
         goto err;
     }
 
+    if (config_lookup_string(&cfg, "interface", &tmp)) {
+        strncpy(config->interface_name, tmp, INTNAME_MAX_LEN);
+        config->interface_id = if_nametoindex(config->interface_name);
+        if (config->interface_id == 0) {
+            goto err;
+        }
+    } else {
+        goto err;
+    }
+
     if (config_lookup_string(&cfg, "keepalive_listen", &tmp)) {
         strncpy(config->keepalive_listen, tmp, IPV4_STR_LEN);
         if (ip_to_int(tmp) == 0)
@@ -98,7 +138,7 @@ static __s32 load_config(const char *filename, struct lb_config *config)
         goto err;
     }
 
-    if (config_lookup_string(&cfg, "keepalive_interface", &tmp)) {
+    if (config_lookup_string(&cfg, "keepalive_address", &tmp)) {
         strncpy(config->keepalive_interface, tmp, IPV4_STR_LEN);
         if (ip_to_int(tmp) == 0)
             goto err;
@@ -164,7 +204,7 @@ static void *watchdog_thread_fn(void *arg)
 
 // TODO: Only do ARPs when required
 // Quick & dirty: Let the kernel do ARPs for our service IPs
-static void *arping_thread_fn(void *arg)
+/*static void *arping_thread_fn(void *arg)
 {
     (void) arg;
 
@@ -180,11 +220,42 @@ static void *arping_thread_fn(void *arg)
     }
 
     return NULL;
-}
+}*/
 
 static int libbpf_print_fn(enum libbpf_print_level level, const char *format, va_list args)
 {
     return vfprintf(stderr, format, args);
+}
+
+static void *xdp_handle_pkts(void *args) {
+    struct xsk_socket_info *xsk = (struct xsk_socket_info *) args;
+    __u32 idx_rxq = 0;
+    __u32 idx_txq = 0;
+
+    while (1) {
+        __s32 rcvd = xsk_ring_cons__peek(&xsk->rxq, XDP_RX_BATCH_SIZE, &idx_rxq);
+
+        if (!rcvd)
+            continue;
+
+        for (__u32 i = 0; i < rcvd; i++) {
+            __u64 addr = xsk_ring_cons__rx_desc(&xsk->rxq, idx_rxq)->addr;
+            __u64 len  = xsk_ring_cons__rx_desc(&xsk->rxq, idx_rxq)->len;
+            
+            void *pkt = xsk_umem__get_data(umem_info->buf, addr);
+
+            struct ethhdr *eth = pkt;
+
+            printf("SRC MAC: %02x:%02x:%02x:%02x:%02x:%02x\n",
+                   eth->h_source[0], eth->h_source[1], eth->h_source[2],
+                   eth->h_source[3], eth->h_source[4], eth->h_source[5]);
+
+        }
+
+        xsk_ring_cons__release(&xsk->rxq, rcvd);
+    }
+
+    return NULL;
 }
 
 int main(int argc, char **argv)
@@ -200,7 +271,9 @@ int main(int argc, char **argv)
     if (load_config(argv[1], &lb_config) != 0)
         exit(EXIT_FAILURE);
 
-    fprintf(stderr, "Virtual Service IP: %s (%u)\n", lb_config.virtual_ip, lb_config.virtual_ip_int);
+    fprintf(stderr, "Virtual Service IP: %s (%u @ %u)\n", lb_config.virtual_ip, 
+        lb_config.virtual_ip_int, 
+        lb_config.interface_id);
     fprintf(stderr, "Service IPs:\n");
     for (__u32 i = 0; i < lb_config.service_ip_count; i++) {
         fprintf(stderr, " - %s (%u)\n", lb_config.service_ips[i], lb_config.service_ips_int[i]);
@@ -243,12 +316,38 @@ int main(int argc, char **argv)
     }
 
     pthread_t watchdog;
-    pthread_t arping;
+    //pthread_t arping;
 
     pthread_create(&watchdog, NULL, watchdog_thread_fn, &watchdog_socket);
-    pthread_create(&arping, NULL, arping_thread_fn, NULL);
+    //pthread_create(&arping, NULL, arping_thread_fn, NULL);
 
     libbpf_set_print(libbpf_print_fn);
+
+    xsk_info = calloc(1, sizeof(*xsk_info));
+    umem_info = calloc(1, sizeof(*umem_info));
+
+    if (xsk_info == NULL || umem_info == NULL)
+        return -1;
+
+    xsk_info->queue_id = 0;
+    xsk_info->ifindex = lb_config.interface_id;
+
+    posix_memalign(&umem_info->buf, getpagesize(), NUM_FRAMES * SIZE_PER_FRAME);
+    xsk_umem__create(&umem_info->umem, umem_info->buf, NUM_FRAMES * SIZE_PER_FRAME,
+                     &umem_info->rxq, &umem_info->txq, NULL);
+
+    struct xsk_socket_config xsk_sock_cfg = {
+        .rx_size = 2048,
+        .tx_size = 2048,
+        .libbpf_flags = 0,
+        .xdp_flags = XDP_FLAGS_UPDATE_IF_NOEXIST | XDP_FLAGS_DRV_MODE,
+        .bind_flags = XDP_USE_NEED_WAKEUP,
+    };
+
+    xsk_socket__create(&xsk_info->xsk, lb_config.interface_name, 0, umem_info->umem,
+                       &xsk_info->rxq, &xsk_info->txq, &xsk_sock_cfg);
+    
+    xsk_info->umem = umem_info;
 
     skel = loadbalancer_bpf__open();
     if (!skel) {
@@ -299,7 +398,16 @@ int main(int argc, char **argv)
                              BPF_ANY);
     }
 
-    bpf_program__attach_xdp(skel->progs.xdp_lb, 3);
+    xsk_info->xsks_map_fd = bpf_map__fd(skel->maps.xsks_map);
+
+    int fd = xsk_socket__fd(xsk_info->xsk);
+    int key = 0;
+    bpf_map_update_elem(xsk_info->xsks_map_fd, &key, &fd, 0);
+
+    pthread_t xdp_thread;
+    pthread_create(&xdp_thread, NULL, xdp_handle_pkts, xsk_info);
+
+    bpf_program__set_ifindex(skel->progs.xdp_lb, lb_config.interface_id);
 
     fprintf(stderr, "Successfully started!\n");
 
@@ -338,9 +446,9 @@ int main(int argc, char **argv)
 cleanup:
     loadbalancer_bpf__destroy(skel);
 
-    pthread_kill(arping, 15);
-    fprintf(stderr, "Waiting for arping thread to terminate\n");
-    pthread_join(arping, NULL);
+    //pthread_kill(arping, 15);
+    //fprintf(stderr, "Waiting for arping thread to terminate\n");
+    //pthread_join(arping, NULL);
 
     pthread_kill(watchdog, 15);
     fprintf(stderr, "Waiting for watchdog thread to terminate\n");

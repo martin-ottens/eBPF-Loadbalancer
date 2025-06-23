@@ -22,7 +22,7 @@ To execute the testbed, install [Proto²Testbed](https://github.com/martin-otten
 
 For building the software and the testbed setup, additional dependencies are required:
 ```bash
-$ apt install ansible make gcc clang llvm libelf-dev libpcap-dev build-essential libc6-dev-i386 m4 libconfig-dev
+$ apt install ansible make gcc clang llvm libelf-dev libpcap-dev build-essential libc6-dev-i386 m4 libconfig-dev libbpf-dev libxdp-dev
 ```
 
 ### Build

@@ -5,6 +5,7 @@
 #define LB_LOOKUP_LEN 60
 #define CONNTRACK_MAP_PERCPU_LEN 1000
 #define IPV4_STR_LEN 16
+#define INTNAME_MAX_LEN 32
 
 typedef struct __service_entry {
     __u32 addr;
