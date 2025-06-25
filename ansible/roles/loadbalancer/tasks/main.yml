@@ -4,6 +4,8 @@
     name:
       - keepalived
       - arping
+      - libbpf-dev
+      - libxdp-dev
     update_cache: false
     state: present
 

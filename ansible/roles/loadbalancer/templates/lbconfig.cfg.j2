@@ -1,5 +1,6 @@
 virtual_ip = "{{ virtual_service_ip.split('/')[0] }}"
 interface = "{{ ingress_if }}"
+enable_af_xdp = false
 keepalive_listen = "239.0.0.1"
 keepalive_address = "{{ keepalive_ip.split('/')[0] }}"
 service_ips = {{ ingress_ips | to_json }}

@@ -12,6 +12,7 @@
 
 __u32 vip = 0;
 __u8 ttl_dec_en = 1;
+__u8 af_xdp_en = 0;
 
 #define AF_INET 2
 
@@ -119,8 +120,6 @@ int xdp_lb(struct xdp_md *ctx)
     void *data = (void *)(long) ctx->data;
     void *data_end = (void *)(long) ctx->data_end;
 
-    bpf_printk("PACKET!\n");
-
     struct ethhdr *eth = data;
     if ((void *)(eth + 1) > data_end)
         return XDP_DROP;
@@ -175,12 +174,15 @@ int xdp_lb(struct xdp_md *ctx)
         case BPF_FIB_LKUP_RET_SUCCESS:
             break;
         case BPF_FIB_LKUP_RET_NO_NEIGH:
-            bpf_printk("REDIRECT!\n");
+            if (!af_xdp_en)
+                return XDP_DROP;
+
             if (bpf_map_lookup_elem(&xsks_map, &qindex)) {
                 return bpf_redirect_map(&xsks_map, qindex, 0);
+            } else {
+                bpf_printk("AF_XDP lookup failed!\n");
+                return XDP_DROP;
             }
-            bpf_printk("AF_XDP lookup failed!\n");
-            return XDP_DROP;
         default:
             return XDP_PASS;
     }
